@@ -1,0 +1,13 @@
+# Web Scraping & Automation
+selenium
+undetected-chromedriver
+
+# PDF and Document Processing
+PyMuPDF
+pdf2docx
+python-docx
+openpyxl
+
+# Data Handling & HTTP Requests
+pandas
+requests
