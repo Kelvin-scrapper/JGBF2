@@ -1,0 +1,13 @@
+# For data handling and Excel processing
+pandas
+openpyxl
+
+# For PDF conversion
+PyMuPDF
+pdf2docx
+python-docx
+
+# For web scraping
+requests
+selenium
+undetected-chromedriver

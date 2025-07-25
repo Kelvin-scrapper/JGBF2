@@ -43,6 +43,7 @@ class JGBFParser:
     def get_template_columns(self) -> List[Dict]:
         """
         Return the exact column structure from the user's target CSV format.
+        This function now perfectly mirrors the provided CSV, including all inconsistencies.
         """
         full_template = []
         instruments = {
@@ -52,6 +53,7 @@ class JGBFParser:
             "3MONTHTONAFUTURES": "3-Month TONA Futures"
         }
 
+        # Part 1: Main Summary Tables (TOTAL_PROPRIETARY_BROKERAGE)
         main_cats = {"PROPRIETARY": "Proprietary", "BROKERAGE": "Brokerage", "TOTAL": "Total"}
         for instr_code, instr_name in instruments.items():
             for cat_code, cat_name in main_cats.items():
@@ -61,19 +63,23 @@ class JGBFParser:
                         desc = f"Trading by Type of Investors, {instr_name}, Total, Proprietary ＆ Brokerage, Trading Value, {cat_name}, {subcat.title()}, {metric.title()}"
                         full_template.append({'code': code, 'description': desc})
 
+        # Part 2: Brokerage Breakdown Tables (The complex part)
         breakdown_cats = {"INSTITUTIONS": "Institutions", "INDIVIDUALS": "Individuals", "FOREIGNERS": "Foreigners", "SECURITIES_COS": "Securities Cos"}
         for instr_code, instr_name in instruments.items():
             for cat_code, cat_name in breakdown_cats.items():
                 for subcat in ["SALES", "PURCHASES"]:
                     for metric in ["VALUE", "BALANCE"]:
-                        if instr_code == 'JGB10YEARFUTURES':
+                        # This is where the user's specific, inconsistent logic is applied
+                        # The TRADINGBYTYPEOFINVESTORS prefix is used for JGB10YEARFUTURES OR for the SECURITIES_COS category.
+                        if instr_code == 'JGB10YEARFUTURES' or cat_code == 'SECURITIES_COS':
                             code = f"JGBF.TRADINGBYTYPEOFINVESTORS.{instr_code}.BREAKDOWNOFBROKERAGE.TRADINGVALUE.{cat_code}.{subcat}.{metric}.W"
                         else:
+                            # The other instruments/categories use this different, also verbose format
                             code = f"JGBF.TOTAL_PROPRIETARY_BROKERAGE.{instr_code}.BREAKDOWNOFBROKERAGE.TRADINGVALUE.{cat_code}.{subcat}.{metric}.W"
-                        
+
                         desc = f"Trading by Type of Investors, {instr_name}, Breakdown of Brokerage, Trading Value, {cat_name}, {subcat.title()}, {metric.title()}"
                         full_template.append({'code': code, 'description': desc})
-                        
+
         return full_template
 
 
@@ -122,32 +128,35 @@ class JGBFParser:
             logger.error(f"Error reading sheet {sheet_name} from {file_path}: {e}")
             return None
 
+    # +++ THIS IS THE CORRECTED PARSING LOGIC +++
     def _parse_table(self, sheet_data: Dict, instrument_code: str, date_code: str, table_type: str) -> List[Dict]:
         results = []
         is_main = table_type == "main_summary"
         category_map = self.main_summary_categories if is_main else self.brokerage_categories
-        
+
         for row in sheet_data['data_rows']:
             if len(row) < 8: continue
             cat_full, subcat_raw, val, bal = str(row[0] or ""), str(row[1] or ""), row[5], row[7]
             if not cat_full or not subcat_raw or "合計" in subcat_raw: continue
-            
+
             category = next((en for jp, en in category_map.items() if jp in cat_full), None)
             subcat = next((en for jp, en in self.subcategories.items() if jp in subcat_raw), None)
             if not category or not subcat: continue
-            
+
             for metric, data_val in [("VALUE", val), ("BALANCE", bal)]:
                 processed_value = self.handle_negative_values(data_val)
                 if processed_value:
                     code = ""
                     if is_main:
                         code = f"JGBF.TOTAL_PROPRIETARY_BROKERAGE.{instrument_code}.TRADINGVALUE.{category}.{subcat}.{metric}.W"
-                    else: # Brokerage Breakdown logic
-                        if instrument_code == 'JGB10YEARFUTURES':
+                    else:  # Brokerage Breakdown logic
+                        # Apply the inconsistent rule from the CSV template:
+                        # The TRADINGBYTYPEOFINVESTORS prefix is used for the main JGB10Y future OR for the SECURITIES_COS category.
+                        if instrument_code == 'JGB10YEARFUTURES' or category == 'SECURITIES_COS':
                             code = f"JGBF.TRADINGBYTYPEOFINVESTORS.{instrument_code}.BREAKDOWNOFBROKERAGE.TRADINGVALUE.{category}.{subcat}.{metric}.W"
                         else:
                             code = f"JGBF.TOTAL_PROPRIETARY_BROKERAGE.{instrument_code}.BREAKDOWNOFBROKERAGE.TRADINGVALUE.{category}.{subcat}.{metric}.W"
-                    
+
                     if code:
                         results.append({'code': code, 'date': date_code, 'value': processed_value})
         return results
@@ -214,9 +223,6 @@ class JGBFParser:
         logger.info(f"[OK] Output successfully saved to: {output_path}")
 
     def process_folders(self, folders_to_process: List[Path]):
-        """
-        Processes all selected folders and combines their data into a single output file.
-        """
         all_excel_files = []
         for folder_path in folders_to_process:
             if folder_path.exists():
